@@ -55,7 +55,10 @@ class TwoLayerNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        self.params['W1'] = weight_scale * np.random.randn(input_dim, hidden_dim)
+        self.params['b1'] = np.zeros(hidden_dim)
+        self.params['W2'] = weight_scale * np.random.randn(hidden_dim, num_classes)
+        self.params['b2'] = np.zeros(num_classes)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -88,7 +91,11 @@ class TwoLayerNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        W1, b1 = self.params['W1'], self.params['b1']
+        W2, b2 = self.params['W2'], self.params['b2']
+
+        hidden, cache_hidden = affine_relu_forward(X, W1, b1)
+        scores, cache_scores = affine_forward(hidden, W2, b2)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -112,7 +119,16 @@ class TwoLayerNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        loss, dscores = softmax_loss(scores, y)
+        loss += 0.5 * self.reg * (np.sum(W1 * W1) + np.sum(W2 * W2))
+
+        dhidden, dW2, db2 = affine_backward(dscores, cache_scores)
+        _, dW1, db1 = affine_relu_backward(dhidden, cache_hidden)
+
+        grads['W2'] = dW2 + self.reg * W2
+        grads['b2'] = db2
+        grads['W1'] = dW1 + self.reg * W1
+        grads['b1'] = db1
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -192,7 +208,21 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        layer_dims = [input_dim] + list(hidden_dims) + [num_classes]
+        for i in range(self.num_layers):
+          w_key = "W%d" % (i + 1)
+          b_key = "b%d" % (i + 1)
+          self.params[w_key] = weight_scale * np.random.randn(
+            layer_dims[i], layer_dims[i + 1]
+          )
+          self.params[b_key] = np.zeros(layer_dims[i + 1])
+
+          # Batch/layer norm parameters exist only for hidden layers.
+          if i < self.num_layers - 1 and self.normalization in ["batchnorm", "layernorm"]:
+            gamma_key = "gamma%d" % (i + 1)
+            beta_key = "beta%d" % (i + 1)
+            self.params[gamma_key] = np.ones(layer_dims[i + 1])
+            self.params[beta_key] = np.zeros(layer_dims[i + 1])
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -254,7 +284,39 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        out = X
+        hidden_caches = []
+
+        for i in range(1, self.num_layers):
+          w_key = "W%d" % i
+          b_key = "b%d" % i
+
+          out, fc_cache = affine_forward(out, self.params[w_key], self.params[b_key])
+
+          norm_cache = None
+          if self.normalization == "batchnorm":
+            gamma_key = "gamma%d" % i
+            beta_key = "beta%d" % i
+            out, norm_cache = batchnorm_forward(
+              out,
+              self.params[gamma_key],
+              self.params[beta_key],
+              self.bn_params[i - 1],
+            )
+          elif self.normalization == "layernorm":
+            raise NotImplementedError("layernorm is not implemented in scripts/layers.py")
+
+          out, relu_cache = relu_forward(out)
+
+          dropout_cache = None
+          if self.use_dropout:
+            out, dropout_cache = dropout_forward(out, self.dropout_param)
+
+          hidden_caches.append((fc_cache, norm_cache, relu_cache, dropout_cache))
+
+        w_key = "W%d" % self.num_layers
+        b_key = "b%d" % self.num_layers
+        scores, final_cache = affine_forward(out, self.params[w_key], self.params[b_key])
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -281,7 +343,35 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        loss, dscores = softmax_loss(scores, y)
+        for i in range(1, self.num_layers + 1):
+          w_key = "W%d" % i
+          loss += 0.5 * self.reg * np.sum(self.params[w_key] * self.params[w_key])
+
+        w_key = "W%d" % self.num_layers
+        b_key = "b%d" % self.num_layers
+        dout, dW, db = affine_backward(dscores, final_cache)
+        grads[w_key] = dW + self.reg * self.params[w_key]
+        grads[b_key] = db
+
+        for i in range(self.num_layers - 1, 0, -1):
+          fc_cache, norm_cache, relu_cache, dropout_cache = hidden_caches[i - 1]
+
+          if self.use_dropout:
+            dout = dropout_backward(dout, dropout_cache)
+
+          dout = relu_backward(dout, relu_cache)
+
+          if self.normalization == "batchnorm":
+            dout, dgamma, dbeta = batchnorm_backward(dout, norm_cache)
+            grads["gamma%d" % i] = dgamma
+            grads["beta%d" % i] = dbeta
+          elif self.normalization == "layernorm":
+            raise NotImplementedError("layernorm is not implemented in scripts/layers.py")
+
+          dout, dW, db = affine_backward(dout, fc_cache)
+          grads["W%d" % i] = dW + self.reg * self.params["W%d" % i]
+          grads["b%d" % i] = db
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
